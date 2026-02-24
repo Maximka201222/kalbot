@@ -75,21 +75,37 @@ if "roulette_bank" not in users_balance:
 # START
 # =====================
 
+def remove_duplicate_usernames(current_id: str, username: str):
+    for uid in list(users_balance.keys()):
+        if uid == "roulette_bank":
+            continue
+        if uid != current_id and users_balance[uid].get("username") == username:
+            # Переносим баланс
+            users_balance[current_id]["balance"] += users_balance[uid]["balance"]
+            del users_balance[uid]
+            
+
 @dp.message(CommandStart())
 async def start_handler(message: types.Message):
     user_id = get_user_id(message.from_user)
     username = get_username(message.from_user)
 
     if user_id not in users_balance:
-        users_balance[user_id] = {"balance": 0, "username": username}
-        save_data()
+        users_balance[user_id] = {
+            "balance": 0,
+            "username": username
+        }
         await message.answer("✅ Ты зарегистрирован в системе KAL")
     else:
         await message.answer("Ты уже зарегистрирован")
 
-    if username:
-        users_balance[user_id]["username"] = username
-        save_data()
+    # Обновляем username
+    users_balance[user_id]["username"] = username
+
+    # 🔥 Удаляем дубликаты
+    remove_duplicate_usernames(user_id, username)
+
+    save_data()
 
 
 # =====================
