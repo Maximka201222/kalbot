@@ -1,44 +1,9 @@
 {
-    "pilotofsu25": {
-        "balance": 500000,
+    "roulette_bank": {
+        "balance": 0
+    },
+    "6406403173": {
+        "balance": 0,
         "username": "pilotofsu25"
-    },
-    "ti0pental": {
-        "balance": 1,
-        "username": "ti0pental"
-    },
-    "olenalipun": {
-        "balance": 499742,
-        "username": "olenalipun",
-        "banned": false,
-        "language": "en"
-    },
-    "hqpowde": {
-        "balance": 1,
-        "username": "hqpowde"
-    },
-    "rtseeyou": {
-        "balance": 1,
-        "username": "rtseeyou"
-    },
-    "eoka52": {
-        "balance": 251,
-        "username": "eoka52"
-    },
-    "anti_zakyr": {
-        "balance": 1,
-        "username": "anti_zakyr"
-    },
-    "phy_427": {
-        "balance": 1,
-        "username": "phy_427"
-    },
-    "liniviyvarenik234": {
-        "balance": 1,
-        "username": "liniviyvarenik234"
-    },
-    "zigachad": {
-        "balance": 1,
-        "username": "zigachad"
     }
 }
