@@ -2,10 +2,17 @@ import asyncio
 import json
 import os
 import random
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
 
-TOKEN = "8380218047:AAGB6Wo2-v0mqUFpmQv4Ol00l_Mse5NwT2w"
+# =====================
+# CONFIG
+# =====================
+
+TOKEN = "8668174547:AAFe89tyKePuJLMaOkb78vKK8xNLelLnm5U"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -14,9 +21,8 @@ DATA_FILE = "balances.json"
 
 ADMINS = ["pilotofsu25", "olenalipun"]
 
-MAX_AMOUNT = 10**40
-MAX_BALANCE = 10**40
-
+MAX_AMOUNT = 10 ** 40
+MAX_BALANCE = 10 ** 40
 
 # =====================
 # FILE FUNCTIONS
@@ -25,6 +31,7 @@ MAX_BALANCE = 10**40
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {}
+
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -36,7 +43,6 @@ def save_data():
 
 users_balance = load_data()
 
-
 # =====================
 # UTILS
 # =====================
@@ -45,11 +51,11 @@ def get_user_id(user: types.User) -> str:
     return str(user.id)
 
 
-def get_username(user: types.User) -> str:
+def get_username(user: types.User):
     return user.username.lower() if user.username else None
 
 
-def is_admin(username: str) -> bool:
+def is_admin(username: str):
     return username in ADMINS
 
 
@@ -57,8 +63,10 @@ def find_user_by_username(username: str):
     for uid, data in users_balance.items():
         if uid == "roulette_bank":
             continue
+
         if data.get("username") == username:
             return uid
+
     return None
 
 
@@ -67,23 +75,24 @@ def find_user_by_username(username: str):
 # =====================
 
 if "roulette_bank" not in users_balance:
-    users_balance["roulette_bank"] = {"balance": 0}
+    users_balance["roulette_bank"] = {
+        "balance": 0
+    }
     save_data()
+
+# =====================
+# FSM STATES
+# =====================
+
+class SendMoney(StatesGroup):
+    user = State()
+    amount = State()
+    message = State()
 
 
 # =====================
 # START
 # =====================
-
-def remove_duplicate_usernames(current_id: str, username: str):
-    for uid in list(users_balance.keys()):
-        if uid == "roulette_bank":
-            continue
-        if uid != current_id and users_balance[uid].get("username") == username:
-            # Переносим баланс
-            users_balance[current_id]["balance"] += users_balance[uid]["balance"]
-            del users_balance[uid]
-            
 
 @dp.message(CommandStart())
 async def start_handler(message: types.Message):
@@ -95,17 +104,15 @@ async def start_handler(message: types.Message):
             "balance": 0,
             "username": username
         }
-        await message.answer("✅ Ты зарегистрирован в системе KAL")
+
+        save_data()
+
+        await message.answer("✅ Ты зарегистрирован")
     else:
-        await message.answer("Ты уже зарегистрирован")
+        users_balance[user_id]["username"] = username
+        save_data()
 
-    # Обновляем username
-    users_balance[user_id]["username"] = username
-
-    # 🔥 Удаляем дубликаты
-    remove_duplicate_usernames(user_id, username)
-
-    save_data()
+        await message.answer("👋 Ты уже зарегистрирован")
 
 
 # =====================
@@ -121,157 +128,121 @@ async def balance_handler(message: types.Message):
         return
 
     balance = users_balance[user_id]["balance"]
+
     await message.answer(f"💰 Баланс: {balance} KAL")
 
 
 # =====================
-# SEND WITH MESSAGE
+# SEND FSM
 # =====================
 
 @dp.message(Command("send"))
-async def send_handler(message: types.Message):
+async def send_start(message: types.Message, state: FSMContext):
     sender_id = get_user_id(message.from_user)
 
     if sender_id not in users_balance:
         await message.answer("Сначала используй /start")
         return
 
-    args = message.text.split(maxsplit=3)
+    await state.set_state(SendMoney.user)
 
-    if len(args) < 3:
-        await message.answer(
-            "Использование:\n"
-            "/send @username amount сообщение\n\n"
-            "Пример:\n"
-            "/send @ivan 100 Спасибо"
-        )
+    await message.answer("👤 Кому отправить? Напиши @username")
+
+
+# STEP 1 USER
+
+@dp.message(SendMoney.user)
+async def send_user(message: types.Message, state: FSMContext):
+    username = message.text.replace("@", "").lower()
+
+    target_id = find_user_by_username(username)
+
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден")
         return
 
-    target_username = args[1].replace("@", "").lower()
+    await state.update_data(
+        target_id=target_id,
+        username=username
+    )
 
+    await state.set_state(SendMoney.amount)
+
+    await message.answer("💰 Сколько отправить?")
+
+
+# STEP 2 AMOUNT
+
+@dp.message(SendMoney.amount)
+async def send_amount(message: types.Message, state: FSMContext):
     try:
-        amount = int(args[2])
+        amount = int(message.text)
     except:
-        await message.answer("Количество должно быть числом")
+        await message.answer("❌ Введи число")
         return
 
     if amount <= 0 or amount > MAX_AMOUNT:
-        await message.answer("Некорректное количество")
+        await message.answer("❌ Некорректная сумма")
         return
+
+    await state.update_data(amount=amount)
+
+    await state.set_state(SendMoney.message)
+
+    await message.answer("💬 Напиши сообщение или /skip")
+
+
+# STEP 3 MESSAGE
+
+@dp.message(SendMoney.message)
+async def send_finish(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+
+    sender_id = get_user_id(message.from_user)
+
+    target_id = data["target_id"]
+    username = data["username"]
+    amount = data["amount"]
+
+    extra_message = message.text
+
+    if extra_message == "/skip":
+        extra_message = ""
 
     if users_balance[sender_id]["balance"] < amount:
-        await message.answer("Недостаточно средств")
+        await message.answer("❌ Недостаточно средств")
+        await state.clear()
         return
 
-    target_id = find_user_by_username(target_username)
-    if target_id is None:
-        await message.answer("Пользователь не найден")
-        return
-
-    extra_message = args[3] if len(args) >= 4 else ""
+    # SEND MONEY
 
     users_balance[sender_id]["balance"] -= amount
     users_balance[target_id]["balance"] += amount
+
     save_data()
 
-    await message.answer(f"✅ Отправлено {amount} KAL @{target_username}")
+    await message.answer(
+        f"✅ Отправлено {amount} KAL пользователю @{username}"
+    )
+
+    # SEND NOTIFICATION
 
     try:
-        text = f"💰 Тебе пришло {amount} KAL\n👤 От: @{get_username(message.from_user)}\n💳 Баланс: {users_balance[target_id]['balance']} KAL"
+        text = (
+            f"💰 Тебе пришло {amount} KAL\n"
+            f"👤 От: @{get_username(message.from_user)}\n"
+            f"💳 Баланс: {users_balance[target_id]['balance']} KAL"
+        )
+
         if extra_message:
             text += f"\n\n💬 Сообщение:\n{extra_message}"
+
         await bot.send_message(int(target_id), text)
+
     except:
         pass
 
-
-# =====================
-# ADD / REMOVE (ADMIN)
-# =====================
-
-@dp.message(Command("add"))
-async def add_handler(message: types.Message):
-    admin_username = get_username(message.from_user)
-    if not is_admin(admin_username):
-        await message.answer("Нет прав")
-        return
-
-    args = message.text.split()
-    if len(args) != 3:
-        await message.answer("/add @username amount")
-        return
-
-    target_username = args[1].replace("@", "").lower()
-    try:
-        amount = int(args[2])
-    except:
-        await message.answer("Ошибка числа")
-        return
-
-    if amount <= 0 or amount > MAX_AMOUNT:
-        await message.answer("Некорректное количество")
-        return
-
-    target_id = find_user_by_username(target_username)
-    if target_id is None:
-        await message.answer("Пользователь не найден")
-        return
-
-    new_balance = users_balance[target_id]["balance"] + amount
-    if new_balance > MAX_BALANCE:
-        await message.answer("Превышен лимит баланса")
-        return
-
-    users_balance[target_id]["balance"] = new_balance
-    save_data()
-
-    await message.answer(f"✅ Начислено {amount} KAL @{target_username}")
-    try:
-        await bot.send_message(int(target_id), f"💰 Тебе начислено {amount} KAL\n👤 Администратор: @{admin_username}\n💳 Баланс: {new_balance} KAL")
-    except:
-        pass
-
-
-@dp.message(Command("remove"))
-async def remove_handler(message: types.Message):
-    admin_username = get_username(message.from_user)
-    if not is_admin(admin_username):
-        await message.answer("Нет прав")
-        return
-
-    args = message.text.split()
-    if len(args) != 3:
-        await message.answer("/remove @username amount")
-        return
-
-    target_username = args[1].replace("@", "").lower()
-    try:
-        amount = int(args[2])
-    except:
-        await message.answer("Ошибка числа")
-        return
-
-    if amount <= 0 or amount > MAX_AMOUNT:
-        await message.answer("Некорректное количество")
-        return
-
-    target_id = find_user_by_username(target_username)
-    if target_id is None:
-        await message.answer("Пользователь не найден")
-        return
-
-    if users_balance[target_id]["balance"] < amount:
-        await message.answer("Недостаточно средств у пользователя")
-        return
-
-    users_balance[target_id]["balance"] -= amount
-    save_data()
-
-    await message.answer(f"❌ Забрано {amount} KAL у @{target_username}")
-    try:
-        await bot.send_message(int(target_id), f"❌ У тебя забрали {amount} KAL\n👤 Администратор: @{admin_username}\n💳 Баланс: {users_balance[target_id]['balance']} KAL")
-    except:
-        pass
+    await state.clear()
 
 
 # =====================
@@ -287,6 +258,7 @@ async def roulette_handler(message: types.Message):
         return
 
     args = message.text.split()
+
     if len(args) != 2:
         await message.answer("Использование:\n/roulette amount")
         return
@@ -294,21 +266,18 @@ async def roulette_handler(message: types.Message):
     try:
         amount = int(args[1])
     except:
-        await message.answer("Ставка должна быть числом")
+        await message.answer("❌ Ставка должна быть числом")
         return
 
     if amount <= 0 or amount > MAX_AMOUNT:
-        await message.answer("Некорректная ставка")
+        await message.answer("❌ Некорректная ставка")
         return
 
-    user_balance = users_balance[user_id]["balance"]
-    bank_balance = users_balance["roulette_bank"]["balance"]
-
-    if amount > user_balance:
-        await message.answer("Недостаточно средств")
+    if users_balance[user_id]["balance"] < amount:
+        await message.answer("❌ Недостаточно средств")
         return
 
-    max_bet = users_balance["roulette_bank"]["balance"] // 2  # 50% от банка
+    max_bet = users_balance["roulette_bank"]["balance"] // 2
 
     if amount > max_bet:
         await message.answer(
@@ -318,25 +287,126 @@ async def roulette_handler(message: types.Message):
 
     spin = await message.answer("🎰 Крутится...")
     await asyncio.sleep(1)
+
     await spin.edit_text("🎰 Крутится..")
     await asyncio.sleep(1)
+
     await spin.edit_text("🎰 Крутится.")
     await asyncio.sleep(1)
 
-    win_chance = 40
     roll = random.randint(1, 100)
 
-    if roll <= win_chance:
+    # 40% win chance
+
+    if roll <= 40:
         users_balance[user_id]["balance"] += amount
         users_balance["roulette_bank"]["balance"] -= amount
-        result = f"🎉 ВЫИГРЫШ!\n+{amount} KAL\n\n💰 Баланс: {users_balance[user_id]['balance']} KAL"
+
+        result = (
+            f"🎉 ВЫИГРЫШ\n"
+            f"+{amount} KAL\n\n"
+            f"💰 Баланс: {users_balance[user_id]['balance']} KAL"
+        )
+
     else:
         users_balance[user_id]["balance"] -= amount
         users_balance["roulette_bank"]["balance"] += amount
-        result = f"💀 ПРОИГРЫШ\n-{amount} KAL\n\n💰 Баланс: {users_balance[user_id]['balance']} KAL"
+
+        result = (
+            f"💀 ПРОИГРЫШ\n"
+            f"-{amount} KAL\n\n"
+            f"💰 Баланс: {users_balance[user_id]['balance']} KAL"
+        )
 
     save_data()
+
     await spin.edit_text(result)
+
+
+# =====================
+# ADMIN ADD
+# =====================
+
+@dp.message(Command("add"))
+async def add_handler(message: types.Message):
+    username = get_username(message.from_user)
+
+    if not is_admin(username):
+        await message.answer("❌ Нет прав")
+        return
+
+    args = message.text.split()
+
+    if len(args) != 3:
+        await message.answer("/add @username amount")
+        return
+
+    target_username = args[1].replace("@", "").lower()
+
+    try:
+        amount = int(args[2])
+    except:
+        await message.answer("❌ Ошибка числа")
+        return
+
+    target_id = find_user_by_username(target_username)
+
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден")
+        return
+
+    users_balance[target_id]["balance"] += amount
+
+    save_data()
+
+    await message.answer(
+        f"✅ Начислено {amount} KAL @{target_username}"
+    )
+
+
+# =====================
+# ADMIN REMOVE
+# =====================
+
+@dp.message(Command("remove"))
+async def remove_handler(message: types.Message):
+    username = get_username(message.from_user)
+
+    if not is_admin(username):
+        await message.answer("❌ Нет прав")
+        return
+
+    args = message.text.split()
+
+    if len(args) != 3:
+        await message.answer("/remove @username amount")
+        return
+
+    target_username = args[1].replace("@", "").lower()
+
+    try:
+        amount = int(args[2])
+    except:
+        await message.answer("❌ Ошибка числа")
+        return
+
+    target_id = find_user_by_username(target_username)
+
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден")
+        return
+
+    if users_balance[target_id]["balance"] < amount:
+        await message.answer("❌ Недостаточно средств")
+        return
+
+    users_balance[target_id]["balance"] -= amount
+
+    save_data()
+
+    await message.answer(
+        f"❌ Забрано {amount} KAL у @{target_username}"
+    )
 
 
 # =====================
@@ -345,12 +415,14 @@ async def roulette_handler(message: types.Message):
 
 @dp.message(Command("radd"))
 async def radd_handler(message: types.Message):
-    admin_username = get_username(message.from_user)
-    if not is_admin(admin_username):
-        await message.answer("Нет прав")
+    username = get_username(message.from_user)
+
+    if not is_admin(username):
+        await message.answer("❌ Нет прав")
         return
 
     args = message.text.split()
+
     if len(args) != 2:
         await message.answer("/radd amount")
         return
@@ -358,26 +430,28 @@ async def radd_handler(message: types.Message):
     try:
         amount = int(args[1])
     except:
-        await message.answer("Ошибка числа")
-        return
-
-    if amount <= 0:
-        await message.answer("Некорректная сумма")
+        await message.answer("❌ Ошибка числа")
         return
 
     users_balance["roulette_bank"]["balance"] += amount
+
     save_data()
-    await message.answer(f"🏦 Банк пополнен на {amount} KAL\n💰 Сейчас в банке: {users_balance['roulette_bank']['balance']} KAL")
+
+    await message.answer(
+        f"🏦 Банк пополнен на {amount} KAL"
+    )
 
 
 @dp.message(Command("rremove"))
 async def rremove_handler(message: types.Message):
-    admin_username = get_username(message.from_user)
-    if not is_admin(admin_username):
-        await message.answer("Нет прав")
+    username = get_username(message.from_user)
+
+    if not is_admin(username):
+        await message.answer("❌ Нет прав")
         return
 
     args = message.text.split()
+
     if len(args) != 2:
         await message.answer("/rremove amount")
         return
@@ -385,44 +459,54 @@ async def rremove_handler(message: types.Message):
     try:
         amount = int(args[1])
     except:
-        await message.answer("Ошибка числа")
-        return
-
-    if amount <= 0:
-        await message.answer("Некорректная сумма")
+        await message.answer("❌ Ошибка числа")
         return
 
     if users_balance["roulette_bank"]["balance"] < amount:
-        await message.answer("Недостаточно средств в банке")
+        await message.answer("❌ Недостаточно средств")
         return
 
     users_balance["roulette_bank"]["balance"] -= amount
+
     save_data()
-    await message.answer(f"💸 Из банка забрано {amount} KAL\n💰 Сейчас в банке: {users_balance['roulette_bank']['balance']} KAL")
+
+    await message.answer(
+        f"💸 Из банка забрано {amount} KAL"
+    )
 
 
 # =====================
-# STATS (ADMIN)
+# STATS
 # =====================
 
 @dp.message(Command("stats"))
 async def stats_handler(message: types.Message):
     username = get_username(message.from_user)
+
     if not is_admin(username):
-        await message.answer("Нет прав")
+        await message.answer("❌ Нет прав")
         return
 
-    total = sum(user["balance"] for uid, user in users_balance.items() if uid != "roulette_bank")
     text = "📊 Статистика:\n\n"
 
+    total = 0
+
     for uid, data in users_balance.items():
+
         if uid == "roulette_bank":
             continue
+
         uname = data.get("username", "unknown")
         bal = data.get("balance", 0)
+
+        total += bal
+
         text += f"@{uname} — {bal} KAL\n"
 
-    text += f"\n🏦 Банк рулетки: {users_balance['roulette_bank']['balance']} KAL"
+    text += (
+        f"\n🏦 Банк рулетки: {users_balance['roulette_bank']['balance']} KAL"
+    )
+
     text += f"\n💰 Всего у пользователей: {total} KAL"
 
     await message.answer(text)
