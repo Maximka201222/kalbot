@@ -16,6 +16,7 @@ TOKEN = "8703749908:AAFRWSOeloG7HnTj_RuNefz-3Yj6qppUdlg"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+active_battle_users = set()
 
 DATA_FILE = "balances.json"
 LOGS_FILE = "transactions.txt"
@@ -246,6 +247,9 @@ async def roulette_handler(message: types.Message):
         await message.answer("❌ Недостаточно средств")
         return
 
+    # списываем ставку сразу
+    users_balance[user_id]["balance"] -= amount
+
     spin = await message.answer("🎰 Крутится.")
     await asyncio.sleep(1)
 
@@ -255,29 +259,45 @@ async def roulette_handler(message: types.Message):
     await spin.edit_text("🎰 Крутится...")
     await asyncio.sleep(1)
 
-    # 50% шанс победы
-    if random.randint(1, 100) <= 50:
+    # шанс победы 35%
+    if random.randint(1, 100) <= 35:
 
-        # множитель от x2 до x100
-        multiplier = random.randint(2, 100)
+        multiplier = random.choice([
+            1.5,
+            2,
+            3,
+            5
+        ])
 
-        win = amount * multiplier
+        total_win = int(amount * multiplier)
 
-        users_balance[user_id]["balance"] += win
+        profit = total_win - amount
+
+        users_balance[user_id]["balance"] += total_win
 
         text = (
             f"🎉 ПОБЕДА\n"
             f"🚀 Множитель: x{multiplier}\n"
-            f"+{win} KAL"
+            f"💰 Выигрыш: +{profit} KAL"
+        )
+
+        log_transaction(
+            users_balance[user_id]["username"],
+            "roulette win",
+            profit
         )
 
     else:
 
-        users_balance[user_id]["balance"] -= amount
-
         text = (
             f"💀 ПРОИГРЫШ\n"
             f"-{amount} KAL"
+        )
+
+        log_transaction(
+            users_balance[user_id]["username"],
+            "roulette lose",
+            amount
         )
 
     save_data()
@@ -298,6 +318,13 @@ async def crash_handler(message: types.Message):
 
     user_id = get_user_id(message.from_user)
 
+    # нельзя запускать несколько игр
+    if user_id in active_crash:
+        await message.answer(
+            "❌ У тебя уже есть активный crash"
+        )
+        return
+
     args = message.text.split()
 
     if len(args) != 2:
@@ -311,18 +338,24 @@ async def crash_handler(message: types.Message):
         await message.answer("❌ Ошибка числа")
         return
 
+    if amount <= 0 or amount > MAX_AMOUNT:
+        return
+
     if users_balance[user_id]["balance"] < amount:
         await message.answer("❌ Недостаточно средств")
         return
 
+    # списываем ставку
     users_balance[user_id]["balance"] -= amount
 
-    multiplier = 0.1
+    multiplier = 0.0
 
     active_crash[user_id] = {
         "amount": amount,
         "multiplier": multiplier
     }
+
+    save_data()
 
     msg = await message.answer(
         "🚀 Запуск ракеты..."
@@ -330,25 +363,30 @@ async def crash_handler(message: types.Message):
 
     await asyncio.sleep(1)
 
-    crash_point = round(
-        random.uniform(2, 5),
-        1
-    )
-
-    while True:
+    # 50 шагов
+    for step in range(1, 51):
 
         await asyncio.sleep(0.7)
 
-        multiplier += 0.1
+        # если игрок уже забрал
+        if user_id not in active_crash:
+            return
 
-        multiplier = round(multiplier, 1)
+        multiplier = round(step * 0.1, 1)
 
         active_crash[user_id]["multiplier"] = multiplier
 
-        if multiplier >= crash_point:
+        # шанс краша растёт каждый ход
+        # x0.1 = 2%
+        # x5.0 = 100%
+        lose_chance = min(
+            5 + step,
+            85
+        )
 
-            if user_id in active_crash:
-                del active_crash[user_id]
+        if random.randint(1, 100) <= lose_chance:
+
+            del active_crash[user_id]
 
             log_transaction(
                 users_balance[user_id]["username"],
@@ -359,7 +397,7 @@ async def crash_handler(message: types.Message):
             save_data()
 
             await msg.edit_text(
-                f"💥 CRASH НА X{crash_point}\n\n"
+                f"💥 CRASH НА X{multiplier}\n\n"
                 f"💀 Проигрыш -{amount} KAL\n\n"
                 f"💰 Баланс: "
                 f"{users_balance[user_id]['balance']} KAL"
@@ -370,13 +408,36 @@ async def crash_handler(message: types.Message):
         await msg.edit_text(
             f"🚀 Ракета летит!\n\n"
             f"📈 Множитель: X{multiplier}\n\n"
-            f"💸 Забрать: {int(amount * multiplier)} KAL\n\n"
+            f"💸 Забрать: "
+            f"{int(amount * multiplier)} KAL\n\n"
             f"👉 /take\n"
             f"👉 /take\n"
             f"👉 /take\n"
-          
         )
 
+    # если дошёл до x5
+    if user_id in active_crash:
+
+        del active_crash[user_id]
+
+        win = int(amount * 5)
+
+        users_balance[user_id]["balance"] += win
+
+        log_transaction(
+            users_balance[user_id]["username"],
+            "crash max win",
+            win
+        )
+
+        save_data()
+
+        await msg.edit_text(
+            f"🏆 МАКСИМУМ X5.0\n\n"
+            f"💰 Выигрыш: {win} KAL\n\n"
+            f"💰 Баланс: "
+            f"{users_balance[user_id]['balance']} KAL"
+        )
 # =====================
 # TAKE
 # =====================
@@ -392,7 +453,8 @@ async def take_handler(message: types.Message):
         )
         return
 
-    game = active_crash[user_id]
+    # сразу удаляем игру
+    game = active_crash.pop(user_id)
 
     amount = game["amount"]
     multiplier = game["multiplier"]
@@ -409,15 +471,12 @@ async def take_handler(message: types.Message):
 
     save_data()
 
-    del active_crash[user_id]
-
     await message.answer(
         f"✅ Ты забрал {win} KAL\n"
         f"🚀 X{multiplier:.1f}\n\n"
         f"💰 Баланс: "
         f"{users_balance[user_id]['balance']} KAL"
     )
-
 # =====================
 # ADMIN ADD
 # =====================
@@ -623,10 +682,26 @@ async def battle_handler(message: types.Message):
 
     target_username = args[1].replace("@", "").lower()
 
+    if from_user_id in active_battle_users:
+        await message.answer(
+            "❌ У тебя уже есть активный battle"
+        )
+        return
+
+    # нельзя вызывать себя
+    if target_username == from_username:
+        await message.answer(
+            "❌ Нельзя вызывать самого себя"
+        )
+        return
+
     try:
         amount = int(args[2])
     except:
         await message.answer("❌ Неверная сумма")
+        return
+
+    if amount <= 0 or amount > MAX_AMOUNT:
         return
 
     if from_user_id not in users_balance:
@@ -644,6 +719,8 @@ async def battle_handler(message: types.Message):
         return
 
     battle_id = str(random.randint(100000, 999999))
+    active_battle_users.add(from_user_id)
+    active_battle_users.add(target_id)
 
     pending_battles[battle_id] = {
         "from": from_user_id,
@@ -685,15 +762,32 @@ async def accept_battle(message: types.Message):
     to_id = battle["to"]
     amount = battle["amount"]
 
+    # проверка баланса второго игрока
     if users_balance[to_id]["balance"] < amount:
         await message.answer("❌ У тебя нет денег")
+        return
+
+    # проверка баланса первого игрока
+    if users_balance[from_id]["balance"] < amount:
+        active_battle_users.discard(from_id)
+        active_battle_users.discard(to_id)
+
+        del pending_battles[battle_id]
+
+        await message.answer(
+            "❌ У создателя боя больше нет денег"
+        )
         return
 
     # списываем ставки
     users_balance[from_id]["balance"] -= amount
     users_balance[to_id]["balance"] -= amount
 
-    winner = random.choice([from_id, to_id])
+    winner = random.choice([
+        from_id,
+        to_id
+    ])
+
     pot = amount * 2
 
     users_balance[winner]["balance"] += pot
@@ -702,7 +796,13 @@ async def accept_battle(message: types.Message):
     to_name = users_balance[to_id]["username"]
     winner_name = users_balance[winner]["username"]
 
-    log_transaction(winner_name, "battle win", pot)
+    log_transaction(
+        winner_name,
+        "battle win",
+        pot
+    )
+    active_battle_users.discard(from_id)
+    active_battle_users.discard(to_id)
 
     save_data()
 
