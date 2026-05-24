@@ -796,30 +796,23 @@ async def accept_battle(message: types.Message):
     users_balance[from_id]["balance"] -= amount
     users_balance[to_id]["balance"] -= amount
 
-    fight_msg = await message.answer(
-        "⚔️ Бой начинается."
-    )
+    from_user = await bot.get_chat(int(from_id))
+    to_user = await bot.get_chat(int(to_id))
+
+    fight_msg_from = await bot.send_message(from_id, "⚔️ Бой начинается...")
+    fight_msg_to = await bot.send_message(to_id, "⚔️ Бой начинается...")
+
+    await asyncio.sleep(1)
+    await fight_msg_from.edit_text("⚔️ Бой начинается..")
+    await fight_msg_to.edit_text("⚔️ Бой начинается..")
+
+    await asyncio.sleep(1)
+    await fight_msg_from.edit_text("⚔️ Бой начинается...")
+    await fight_msg_to.edit_text("⚔️ Бой начинается...")
 
     await asyncio.sleep(1)
 
-    await fight_msg.edit_text(
-        "⚔️ Бой начинается.."
-    )
-
-    await asyncio.sleep(1)
-
-    await fight_msg.edit_text(
-        "⚔️ Бой начинается..."
-    )
-
-    await asyncio.sleep(1)
-
-
-    winner = random.choice([
-        from_id,
-        to_id
-    ])
-
+    winner = random.choice([from_id, to_id])
     pot = amount * 2
 
     users_balance[winner]["balance"] += pot
@@ -828,24 +821,41 @@ async def accept_battle(message: types.Message):
     to_name = users_balance[to_id]["username"]
     winner_name = users_balance[winner]["username"]
 
-    log_transaction(
-        winner_name,
-        "battle win",
-        pot
-    )
+    log_transaction(winner_name, "battle win", pot)
+
     active_battle_users.discard(from_id)
     active_battle_users.discard(to_id)
 
     save_data()
-
     del pending_battles[battle_id]
 
-    await message.answer(
-        f"⚔️ Бой завершён!\n\n"
-        f"@{from_name} vs @{to_name}\n\n"
-        f"🏆 Победитель: @{winner_name}\n"
-        f"💰 Выигрыш: {pot} KAL"
-    )
+    # =========================
+    # ЛИЧНЫЕ РЕЗУЛЬТАТЫ
+    # =========================
+
+    if winner == from_id:
+        await fight_msg_from.edit_text(
+            f"🏆 ТЫ ПОБЕДИЛ!\n\n"
+            f"💰 +{pot} KAL\n"
+            f"⚔️ Против: @{to_name}"
+        )
+
+        await fight_msg_to.edit_text(
+            f"💀 ТЫ ПРОИГРАЛ\n\n"
+            f"🏆 Победил @{from_name}"
+        )
+
+    else:
+        await fight_msg_to.edit_text(
+            f"🏆 ТЫ ПОБЕДИЛ!\n\n"
+            f"💰 +{pot} KAL\n"
+            f"⚔️ Против: @{from_name}"
+        )
+
+        await fight_msg_from.edit_text(
+            f"💀 ТЫ ПРОИГРАЛ\n\n"
+            f"🏆 Победил @{to_name}"
+        )
 
 async def main():
 
