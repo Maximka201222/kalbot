@@ -735,6 +735,19 @@ async def battle_handler(message: types.Message):
         f"Ожидание ответа..."
     )
 
+    try:
+        await bot.send_message(
+            chat_id=int(target_id),
+            text=(
+                f"⚔️ Тебя вызвал @{from_username}\n\n"
+                f"💰 Ставка: {amount} KAL\n"
+                f"🆔 ID боя: {battle_id}\n\n"
+                f"👉 /accept_battle {battle_id}"
+            )
+        )
+    except:
+        pass
+
 @dp.message(Command("accept_battle"))
 async def accept_battle(message: types.Message):
 
@@ -782,6 +795,25 @@ async def accept_battle(message: types.Message):
     # списываем ставки
     users_balance[from_id]["balance"] -= amount
     users_balance[to_id]["balance"] -= amount
+
+    fight_msg = await message.answer(
+        "⚔️ Бой начинается."
+    )
+
+    await asyncio.sleep(1)
+
+    await fight_msg.edit_text(
+        "⚔️ Бой начинается.."
+    )
+
+    await asyncio.sleep(1)
+
+    await fight_msg.edit_text(
+        "⚔️ Бой начинается..."
+    )
+
+    await asyncio.sleep(1)
+
 
     winner = random.choice([
         from_id,
