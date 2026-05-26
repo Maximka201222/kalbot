@@ -179,6 +179,79 @@ async def balance_handler(message: types.Message):
     )
 
 # =====================
+# SEND MONEY
+# =====================
+
+@dp.message(Command("send"))
+async def send_handler(message: types.Message):
+
+    args = message.text.split()
+
+    if len(args) != 3:
+        await message.answer("/send @user amount")
+        return
+
+    from_user_id = get_user_id(message.from_user)
+    from_username = get_username(message.from_user)
+
+    if from_user_id not in users_balance:
+        await message.answer("Используй /start")
+        return
+
+    target_username = args[1].replace("@", "").lower()
+
+    try:
+        amount = int(args[2])
+    except:
+        await message.answer("❌ Ошибка числа")
+        return
+
+    if amount <= 0 or amount > MAX_AMOUNT:
+        await message.answer("❌ Неверная сумма")
+        return
+
+    if users_balance[from_user_id]["balance"] < amount:
+        await message.answer("❌ Недостаточно средств")
+        return
+
+    target_id = find_user_by_username(target_username)
+
+    if not target_id:
+        await message.answer("❌ Пользователь не найден")
+        return
+
+    if target_id == from_user_id:
+        await message.answer("❌ Нельзя отправить самому себе")
+        return
+
+    # списание и начисление
+    users_balance[from_user_id]["balance"] -= amount
+    users_balance[target_id]["balance"] += amount
+
+    # лог
+    log_transaction(from_username, "send out", amount)
+    log_transaction(target_username, "send in", amount)
+
+    save_data()
+
+    await message.answer(
+        f"✅ Ты отправил @{target_username} {amount} KAL\n"
+        f"💰 Баланс: {users_balance[from_user_id]['balance']} KAL"
+    )
+
+    try:
+        await bot.send_message(
+            chat_id=int(target_id),
+            text=(
+                f"💸 Ты получил {amount} KAL\n"
+                f"👤 От: @{from_username}\n"
+                f"💰 Баланс: {users_balance[target_id]['balance']} KAL"
+            )
+        )
+    except:
+        pass
+
+# =====================
 # DAILY
 # =====================
 
